@@ -21,12 +21,25 @@ jobs:
           echo "RELEASE_TAG=$BUILD_TAG" >> $GITHUB_OUTPUT
           echo "Generated Tag: $BUILD_TAG"
 
-      - name: Download src.zip from GameJolt
+      - name: Download src.zip from MediaFire
         run: |
-          curl -L -A "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
-            -o src.zip "https://gamejolt.com/get/build?game=643082&build=1748090"
+          MEDIAFIRE_LINK="https://www.mediafire.com/file/8k8okc39c1vgbj9/src.zip?dkey=r7j9tu853x4&r=1508"
 
-          echo "Downloaded file details:"
+          echo "Attempting download from MediaFire..."
+          curl -L -A "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36" \
+            -o src.zip "$MEDIAFIRE_LINK"
+
+          # Fallback check: If MediaFire returned HTML page, extract raw direct download URL
+          if ! file src.zip | grep -q "Zip archive data"; then
+            echo "Initial link returned HTML. Resolving direct download link..."
+            DIRECT_URL=$(grep -o 'href="https://download[^"]*' src.zip | head -n 1 | cut -d'"' -f2)
+            if [ -n "$DIRECT_URL" ]; then
+              echo "Found direct link: $DIRECT_URL"
+              curl -L -A "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36" -o src.zip "$DIRECT_URL"
+            fi
+          fi
+
+          echo "Downloaded file verification:"
           file src.zip
           ls -lh src.zip
 
@@ -183,7 +196,6 @@ jobs:
                               let currentTag = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
                               
                               DispatchQueue.main.async {
-                                  // Compare unique build tags
                                   if !currentTag.isEmpty && latestTag != currentTag {
                                       checkingImgView.removeFromSuperview()
                                       self.showUpdatePrompts(in: overlay)
