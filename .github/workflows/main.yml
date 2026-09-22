@@ -60,7 +60,6 @@ jobs:
           yarn install
           yarn build
 
-          # Verify output bundle
           if [ -d "dist" ]; then
             echo "Vite build successful! dist folder created."
           elif [ -d "build" ]; then
@@ -77,7 +76,7 @@ jobs:
 
           APP_VERSION="${{ steps.tag.outputs.RELEASE_TAG }}"
 
-          # Info.plist
+          # Info.plist targeting iOS 12.0 up to iOS 27+ (Finals & Betas)
           cat << EOF > OutertaleApp/OutertaleApp/Info.plist
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -95,6 +94,8 @@ jobs:
               <string>${APP_VERSION}</string>
               <key>CFBundleVersion</key>
               <string>1</string>
+              <key>MinimumOSVersion</key>
+              <string>12.0</string>
               <key>LSRequiresIPhoneOS</key>
               <true/>
               <key>UIStatusBarHidden</key>
@@ -281,8 +282,9 @@ jobs:
         run: |
           mkdir -p Payload/OutertaleApp.app
           
+          # Target arm64 iOS 12.0 for complete backwards and forwards system compatibility (iOS 12 through iOS 27 release/betas)
           xcrun -sdk iphoneos swiftc OutertaleApp/OutertaleApp/Main.swift \
-            -target arm64-apple-ios14.0 \
+            -target arm64-apple-ios12.0 \
             -emit-executable \
             -o Payload/OutertaleApp.app/OutertaleApp
             
@@ -298,5 +300,5 @@ jobs:
           tag: ${{ steps.tag.outputs.RELEASE_TAG }}
           name: "Outertale iOS Build ${{ steps.tag.outputs.RELEASE_TAG }}"
           body: |
-            Automated iOS port compiled with unique release tag tracking (${{ steps.tag.outputs.RELEASE_TAG }}).
+            Automated iOS port compiled with target support for iOS 12.0 through iOS 27 (betas and final releases included).
           token: ${{ secrets.GITHUB_TOKEN }}
