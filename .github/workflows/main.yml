@@ -14,14 +14,47 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Download src.zip from GameJolt
-        run: |
-          # Fetch using wget with full browser headers and redirect handling
-          wget --user-agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
-            --max-redirect=10 \
-            -O src.zip "https://gamejolt.com/get/build?game=643082&build=1748090"
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
 
-          echo "Downloaded file size and type:"
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Resolve and Download src.zip from GameJolt
+        run: |
+          python3 -c '
+          import requests
+          import re
+
+          url = "https://gamejolt.com/get/build?game=643082&build=1748090"
+          headers = {
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+          }
+
+          session = requests.Session()
+          res = session.get(url, headers=headers)
+
+          # Find real direct CDN URL inside GameJolt response
+          match = re.search(r"https?://[^\s\"\']+\.zip[^\s\"\']*", res.text) or re.search(r"https?://[^\s\"\']+/get/build/[^\s\"\']*", res.text)
+          
+          if match:
+              download_url = match.group(0)
+          else:
+              download_url = res.url
+
+          print(f"Downloading from: {download_url}")
+          dl_res = session.get(download_url, headers=headers, stream=True)
+
+          with open("src.zip", "wb") as f:
+              for chunk in dl_res.iter_content(chunk_size=8192):
+                  f.write(chunk)
+
+          print("Download step complete.")
+          '
+
+          echo "File status:"
           file src.zip
           ls -lh src.zip
 
@@ -29,21 +62,18 @@ jobs:
         run: |
           mkdir -p extracted_src
           
-          # Unzip the downloaded source zip
           unzip -q src.zip -d extracted_src
           
-          # Check for www folder directly inside extracted_src
           if [ -d "extracted_src/www" ]; then
             cp -r extracted_src/www ./www
-            echo "Successfully found www folder in src.zip root!"
+            echo "Found www folder in src.zip!"
           else
-            # Search deeper for www inside any subfolders
             FIND_WWW=$(find extracted_src -type d -name "www" | head -n 1)
             if [ -n "$FIND_WWW" ]; then
               cp -r "$FIND_WWW" ./www
               echo "Found www folder at: $FIND_WWW"
             else
-              echo "Error: Could not locate www folder inside src.zip."
+              echo "Error: Could not locate www folder inside archive."
               exit 1
             fi
           fi
@@ -201,5 +231,5 @@ jobs:
           tag: ${{ steps.tag.outputs.RELEASE_TAG }}
           name: "Outertale iOS Build ${{ steps.tag.outputs.RELEASE_TAG }}"
           body: |
-            Automated iOS port compiled from GameJolt src.zip assets.
+            Automated iOS port compiled from Outertale source assets.
           token: ${{ secrets.GITHUB_TOKEN }}
