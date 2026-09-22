@@ -1,0 +1,192 @@
+name: Build Outertale iOS IPA
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-ipa:
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download Outertale APK
+        run: |
+          curl -L -s -o outertale.apk "https://gamejolt.com/get/build?game=643082&build=1799094"
+          echo "Downloaded Outertale APK."
+
+      - name: Extract www assets
+        run: |
+          mkdir -p extracted_apk
+          unzip -q outertale.apk -d extracted_apk
+          
+          if [ -d "extracted_apk/assets/www" ]; then
+            cp -r extracted_apk/assets/www ./www
+          else
+            find extracted_apk/assets -type d -name "www" -exec cp -r {} ./www \;
+          fi
+
+      - name: Create App Payload & Update Detector
+        run: |
+          mkdir -p OutertaleApp/OutertaleApp/www
+          cp -r www/* OutertaleApp/OutertaleApp/www/
+
+          # Info.plist
+          cat << 'EOF' > OutertaleApp/OutertaleApp/Info.plist
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleExecutable</key>
+              <string>OutertaleApp</string>
+              <key>CFBundleIdentifier</key>
+              <string>com.spamton.outertale</string>
+              <key>CFBundleName</key>
+              <string>Outertale</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>CFBundleShortVersionString</key>
+              <string>1.0.0</string>
+              <key>CFBundleVersion</key>
+              <string>1</string>
+              <key>LSRequiresIPhoneOS</key>
+              <true/>
+              <key>UIStatusBarHidden</key>
+              <true/>
+              <key>UISupportedInterfaceOrientations</key>
+              <array>
+                  <string>UIInterfaceOrientationLandscapeLeft</string>
+                  <string>UIInterfaceOrientationLandscapeRight</string>
+              </array>
+              <key>NSAppTransportSecurity</key>
+              <dict>
+                  <key>NSAllowsArbitraryLoads</key>
+                  <true/>
+              </dict>
+          </dict>
+          </plist>
+          EOF
+
+          # Main Swift App Entry Point configured for spamton-ontop/Outertale-ipa
+          cat << 'EOF' > OutertaleApp/OutertaleApp/Main.swift
+          import UIKit
+          import WebKit
+
+          @UIApplicationMain
+          class AppDelegate: UIResponder, UIApplicationDelegate, WKNavigationDelegate {
+              var window: UIWindow?
+              var webView: WKWebView!
+
+              // GitHub Repository Details
+              let repoOwner = "spamton-ontop"
+              let repoName = "Outertale-ipa"
+
+              func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+                  window = UIWindow(frame: UIScreen.main.bounds)
+                  let controller = UIViewController()
+                  
+                  let config = WKWebViewConfiguration()
+                  config.allowsInlineMediaPlayback = true
+                  config.preferences.setValue(true, forKey: "allowFileAccessFromFileURLs")
+                  config.setValue(true, forKey: "allowUniversalAccessFromFileURLs")
+                  
+                  webView = WKWebView(frame: controller.view.bounds, configuration: config)
+                  webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+                  webView.scrollView.isScrollEnabled = false
+                  webView.scrollView.bounces = false
+                  webView.navigationDelegate = self
+                  
+                  controller.view.addSubview(webView)
+                  window?.rootViewController = controller
+                  window?.makeKeyAndVisible()
+                  
+                  if let wwwPath = Bundle.main.path(forResource: "www", ofType: nil) {
+                      let indexUrl = URL(fileURLWithPath: wwwPath).appendingPathComponent("index.html")
+                      let readAccess = URL(fileURLWithPath: wwwPath)
+                      webView.loadFileURL(indexUrl, allowingReadAccessTo: readAccess)
+                  }
+                  
+                  checkForUpdates(viewController: controller)
+                  
+                  return true
+              }
+
+              func checkForUpdates(viewController: UIViewController) {
+                  let urlString = "https://api.github.com/repos/\(repoOwner)/\(repoName)/releases/latest"
+                  guard let url = URL(string: urlString) else { return }
+                  
+                  var request = URLRequest(url: url)
+                  request.setValue("application/vnd.github.v3+json", forHTTPHeaderField: "Accept")
+                  
+                  URLSession.shared.dataTask(with: request) { data, response, error in
+                      guard let data = data, error == nil else { return }
+                      
+                      do {
+                          if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                             let latestTag = json["tag_name"] as? String,
+                             let htmlUrl = json["html_url"] as? String {
+                              
+                              let currentVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
+                              
+                              if latestTag != currentVersion && !latestTag.contains(currentVersion) {
+                                  DispatchQueue.main.async {
+                                      let alert = UIAlertController(
+                                          title: "Update Available!",
+                                          message: "A new version (\(latestTag)) of Outertale is available.",
+                                          preferredStyle: .alert
+                                      )
+                                      alert.addAction(UIAlertAction(title: "Download", style: .default) { _ in
+                                          if let downloadUrl = URL(string: htmlUrl) {
+                                              UIApplication.shared.open(downloadUrl)
+                                          }
+                                      })
+                                      alert.addAction(UIAlertAction(title: "Later", style: .cancel))
+                                      viewController.present(alert, animated: true)
+                                  }
+                              }
+                          }
+                      } catch {
+                          print("Update check error: \(error)")
+                      }
+                  }.resume()
+              }
+          }
+          EOF
+
+      - name: Build IPA Package
+        run: |
+          mkdir -p Payload/OutertaleApp.app
+          
+          xcrun -sdk iphoneos swiftc OutertaleApp/OutertaleApp/Main.swift \
+            -target arm64-apple-ios14.0 \
+            -emit-executable \
+            -o Payload/OutertaleApp.app/OutertaleApp
+            
+          cp OutertaleApp/OutertaleApp/Info.plist Payload/OutertaleApp.app/
+          cp -r OutertaleApp/OutertaleApp/www Payload/OutertaleApp.app/
+          
+          zip -q -r Outertale.ipa Payload
+
+      - name: Generate Version Tag
+        id: tag
+        run: |
+          TAG_NAME="v1.0.$(date +'%Y%m%d%H%M')"
+          echo "RELEASE_TAG=$TAG_NAME" >> $GITHUB_OUTPUT
+          echo "Generated Tag: $TAG_NAME"
+
+      - name: Create GitHub Release
+        uses: ncipollo/release-action@v1
+        with:
+          artifacts: "Outertale.ipa"
+          tag: ${{ steps.tag.outputs.RELEASE_TAG }}
+          name: "Outertale iOS Build ${{ steps.tag.outputs.RELEASE_TAG }}"
+          body: |
+            Automated iOS port compiled from Outertale APK.
+            
+            **Sideloading Instructions:**
+            Download `Outertale.ipa` and install using AltStore, SideStore, ESign, or LiveContainer.
+          token: ${{ secrets.GITHUB_TOKEN }}
