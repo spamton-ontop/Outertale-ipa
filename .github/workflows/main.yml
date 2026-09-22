@@ -14,20 +14,53 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Download Outertale APK
+      - name: Download Outertale Archive
         run: |
-          curl -L -s -o outertale.apk "https://gamejolt.com/get/build?game=643082&build=1799094"
-          echo "Downloaded Outertale APK."
+          # Fetch with browser User-Agent to follow GameJolt direct download redirects
+          curl -L -A "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
+            -o download.zip "https://gamejolt.com/get/build?game=643082&build=1799094"
+            
+          echo "Downloaded file size and type:"
+          file download.zip
+          ls -lh download.zip
 
-      - name: Extract www assets
+      - name: Extract Outer ZIP and Inner APK Assets
         run: |
-          mkdir -p extracted_apk
-          unzip -q outertale.apk -d extracted_apk
+          mkdir -p raw_download extracted_apk
           
+          # Unzip outer archive from GameJolt
+          unzip -q download.zip -d raw_download
+          
+          # Find the nested APK file
+          APK_PATH=$(find raw_download -name "*.apk" | head -n 1)
+          
+          if [ -z "$APK_PATH" ]; then
+            echo "Error: Could not find APK file inside downloaded ZIP."
+            exit 1
+          fi
+          
+          echo "Found APK at: $APK_PATH"
+          
+          # Unzip APK contents
+          unzip -q "$APK_PATH" -d extracted_apk
+          
+          # Target assets/www directly inside the extracted APK structure
           if [ -d "extracted_apk/assets/www" ]; then
             cp -r extracted_apk/assets/www ./www
+            echo "Successfully isolated assets/www!"
+          elif [ -d "extracted_apk/android/assets/www" ]; then
+            cp -r extracted_apk/android/assets/www ./www
+            echo "Successfully isolated android/assets/www!"
           else
-            find extracted_apk/assets -type d -name "www" -exec cp -r {} ./www \;
+            # Deep search for www inside any assets subfolder
+            FIND_WWW=$(find extracted_apk -type d -name "www" | head -n 1)
+            if [ -n "$FIND_WWW" ]; then
+              cp -r "$FIND_WWW" ./www
+              echo "Found www at: $FIND_WWW"
+            else
+              echo "Error: Could not locate assets/www folder."
+              exit 1
+            fi
           fi
 
       - name: Create App Payload & Update Detector
@@ -71,7 +104,7 @@ jobs:
           </plist>
           EOF
 
-          # Main Swift App Entry Point configured for spamton-ontop/Outertale-ipa
+          # Swift Application Entry Point
           cat << 'EOF' > OutertaleApp/OutertaleApp/Main.swift
           import UIKit
           import WebKit
@@ -81,7 +114,6 @@ jobs:
               var window: UIWindow?
               var webView: WKWebView!
 
-              // GitHub Repository Details
               let repoOwner = "spamton-ontop"
               let repoName = "Outertale-ipa"
 
@@ -176,7 +208,6 @@ jobs:
         run: |
           TAG_NAME="v1.0.$(date +'%Y%m%d%H%M')"
           echo "RELEASE_TAG=$TAG_NAME" >> $GITHUB_OUTPUT
-          echo "Generated Tag: $TAG_NAME"
 
       - name: Create GitHub Release
         uses: ncipollo/release-action@v1
@@ -185,8 +216,5 @@ jobs:
           tag: ${{ steps.tag.outputs.RELEASE_TAG }}
           name: "Outertale iOS Build ${{ steps.tag.outputs.RELEASE_TAG }}"
           body: |
-            Automated iOS port compiled from Outertale APK.
-            
-            **Sideloading Instructions:**
-            Download `Outertale.ipa` and install using AltStore, SideStore, ESign, or LiveContainer.
+            Automated iOS port compiled from Outertale.
           token: ${{ secrets.GITHUB_TOKEN }}
