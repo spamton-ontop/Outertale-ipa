@@ -14,11 +14,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Free Disk Space on macOS Runner
+      - name: Free Disk Space
         run: |
-          echo "Clearing unused caches and system logs..."
-          sudo rm -rf /Library/Developer/CommandLineTools
-          rm -rf ~/Library/Caches/*
+          echo "Cleaning caches safely..."
+          sudo rm -rf ~/Library/Caches/* 2>/dev/null || true
+          sudo rm -rf /Library/Developer/CommandLineTools 2>/dev/null || true
           df -h
 
       - name: Setup Node.js Environment
@@ -52,8 +52,8 @@ jobs:
         run: |
           mkdir -p src_extracted
           
-          # Extract while excluding huge optional compressed asset folders if present
-          unzip -q src.zip -x "*colormode/*" -d src_extracted || unzip -q src.zip -d src_extracted
+          # Extract without crashing on nested archives
+          unzip -q src.zip -d src_extracted || true
           
           if [ -f "src_extracted/package.json" ]; then
             cp -r src_extracted/* ./
@@ -62,7 +62,7 @@ jobs:
             cp -r "$INNER_DIR"/* ./
           fi
           
-          # Delete temporary archives immediately to free up runner disk space
+          # Delete source zip immediately to conserve disk space
           rm -rf src_extracted src.zip
 
       - name: Install Dependencies & Build Web Assets
