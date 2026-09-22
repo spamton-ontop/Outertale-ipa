@@ -14,6 +14,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Free Disk Space on macOS Runner
+        run: |
+          echo "Clearing unused caches and system logs..."
+          sudo rm -rf /Library/Developer/CommandLineTools
+          rm -rf ~/Library/Caches/*
+          df -h
+
       - name: Setup Node.js Environment
         uses: actions/setup-node@v4
         with:
@@ -41,10 +48,12 @@ jobs:
           curl -L -A "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36" \
             -o src.zip "$DIRECT_URL"
 
-      - name: Extract Source Code
+      - name: Extract Source Code Cleanly
         run: |
           mkdir -p src_extracted
-          unzip -q src.zip -d src_extracted
+          
+          # Extract while excluding huge optional compressed asset folders if present
+          unzip -q src.zip -x "*colormode/*" -d src_extracted || unzip -q src.zip -d src_extracted
           
           if [ -f "src_extracted/package.json" ]; then
             cp -r src_extracted/* ./
@@ -53,6 +62,7 @@ jobs:
             cp -r "$INNER_DIR"/* ./
           fi
           
+          # Delete temporary archives immediately to free up runner disk space
           rm -rf src_extracted src.zip
 
       - name: Install Dependencies & Build Web Assets
@@ -76,7 +86,7 @@ jobs:
 
           APP_VERSION="${{ steps.tag.outputs.RELEASE_TAG }}"
 
-          # Info.plist targeting iOS 12.0 up to iOS 27+ (Finals & Betas)
+          # Info.plist targeting iOS 12.0 up to iOS 27 (Finals & Betas)
           cat << EOF > OutertaleApp/OutertaleApp/Info.plist
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -282,7 +292,6 @@ jobs:
         run: |
           mkdir -p Payload/OutertaleApp.app
           
-          # Target arm64 iOS 12.0 for complete backwards and forwards system compatibility (iOS 12 through iOS 27 release/betas)
           xcrun -sdk iphoneos swiftc OutertaleApp/OutertaleApp/Main.swift \
             -target arm64-apple-ios12.0 \
             -emit-executable \
