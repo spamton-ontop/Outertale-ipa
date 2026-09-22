@@ -14,6 +14,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Setup Node.js Environment
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
       - name: Generate Unique Version Tag
         id: tag
         run: |
@@ -25,59 +30,54 @@ jobs:
         run: |
           MEDIAFIRE_PAGE="https://www.mediafire.com/file/8k8okc39c1vgbj9/src.zip/file"
           
-          echo "Fetching direct MediaFire download URL..."
+          echo "Fetching direct MediaFire link..."
           DIRECT_URL=$(curl -sL "$MEDIAFIRE_PAGE" | grep -oE 'https://download[0-9]+\.mediafire\.com/[^"]+' | head -n 1)
 
           if [ -z "$DIRECT_URL" ]; then
-            echo "Direct link extraction failed. Trying direct key parameter..."
             DIRECT_URL="https://www.mediafire.com/file/8k8okc39c1vgbj9/src.zip?dkey=r7j9tu853x4&r=1508"
           fi
 
-          echo "Downloading from: $DIRECT_URL"
+          echo "Downloading archive..."
           curl -L -A "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36" \
             -o src.zip "$DIRECT_URL"
 
-          echo "Verifying downloaded archive:"
-          file src.zip
-          ls -lh src.zip
+      - name: Extract Source Code
+        run: |
+          mkdir -p src_extracted
+          unzip -q src.zip -d src_extracted
+          
+          if [ -f "src_extracted/package.json" ]; then
+            cp -r src_extracted/* ./
+          else
+            INNER_DIR=$(find src_extracted -name "package.json" -exec dirname {} \;)
+            cp -r "$INNER_DIR"/* ./
+          fi
+          
+          rm -rf src_extracted src.zip
 
-          if ! file src.zip | grep -q "Zip archive data"; then
-            echo "Error: Downloaded file is not a valid ZIP archive."
+      - name: Install Dependencies & Build Web Assets
+        run: |
+          yarn install
+          yarn build
+
+          # Verify output bundle
+          if [ -d "dist" ]; then
+            echo "Vite build successful! dist folder created."
+          elif [ -d "build" ]; then
+            mv build dist
+          else
+            echo "Error: Web build failed to output dist directory."
             exit 1
           fi
-
-      - name: Extract www Directly from src.zip
-        run: |
-          # Extract only the www directory to save disk space and prevent storage exit code 50
-          unzip -q src.zip "www/*" -d . || unzip -q src.zip "*/www/*" -d .
-
-          if [ -d "www" ]; then
-            echo "Successfully isolated www directory!"
-          elif [ -d "extracted_src/www" ]; then
-            mv extracted_src/www ./www
-            echo "Isolated www from subfolder!"
-          else
-            FIND_WWW=$(find . -type d -name "www" | head -n 1)
-            if [ -n "$FIND_WWW" ]; then
-              mv "$FIND_WWW" ./www
-              echo "Found www directory at: $FIND_WWW"
-            else
-              echo "Error: Could not locate www directory inside archive."
-              exit 1
-            fi
-          fi
-
-          # Cleanup src.zip immediately to free up runner space
-          rm -f src.zip
 
       - name: Create App Payload & Update Detector
         run: |
           mkdir -p OutertaleApp/OutertaleApp/www
-          cp -r www/* OutertaleApp/OutertaleApp/www/
+          cp -r dist/* OutertaleApp/OutertaleApp/www/
 
           APP_VERSION="${{ steps.tag.outputs.RELEASE_TAG }}"
 
-          # Info.plist with Unique Tag embedded as Version
+          # Info.plist
           cat << EOF > OutertaleApp/OutertaleApp/Info.plist
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
