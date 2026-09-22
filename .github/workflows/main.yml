@@ -14,51 +14,36 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Download Outertale Archive
+      - name: Download src.zip from GameJolt
         run: |
-          # Fetch with browser User-Agent to follow GameJolt direct download redirects
-          curl -L -A "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
-            -o download.zip "https://gamejolt.com/get/build?game=643082&build=1799094"
-            
-          echo "Downloaded file size and type:"
-          file download.zip
-          ls -lh download.zip
+          # Fetch using wget with full browser headers and redirect handling
+          wget --user-agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
+            --max-redirect=10 \
+            -O src.zip "https://gamejolt.com/get/build?game=643082&build=1748090"
 
-      - name: Extract Outer ZIP and Inner APK Assets
+          echo "Downloaded file size and type:"
+          file src.zip
+          ls -lh src.zip
+
+      - name: Extract src.zip and Locate www
         run: |
-          mkdir -p raw_download extracted_apk
+          mkdir -p extracted_src
           
-          # Unzip outer archive from GameJolt
-          unzip -q download.zip -d raw_download
+          # Unzip the downloaded source zip
+          unzip -q src.zip -d extracted_src
           
-          # Find the nested APK file
-          APK_PATH=$(find raw_download -name "*.apk" | head -n 1)
-          
-          if [ -z "$APK_PATH" ]; then
-            echo "Error: Could not find APK file inside downloaded ZIP."
-            exit 1
-          fi
-          
-          echo "Found APK at: $APK_PATH"
-          
-          # Unzip APK contents
-          unzip -q "$APK_PATH" -d extracted_apk
-          
-          # Target assets/www directly inside the extracted APK structure
-          if [ -d "extracted_apk/assets/www" ]; then
-            cp -r extracted_apk/assets/www ./www
-            echo "Successfully isolated assets/www!"
-          elif [ -d "extracted_apk/android/assets/www" ]; then
-            cp -r extracted_apk/android/assets/www ./www
-            echo "Successfully isolated android/assets/www!"
+          # Check for www folder directly inside extracted_src
+          if [ -d "extracted_src/www" ]; then
+            cp -r extracted_src/www ./www
+            echo "Successfully found www folder in src.zip root!"
           else
-            # Deep search for www inside any assets subfolder
-            FIND_WWW=$(find extracted_apk -type d -name "www" | head -n 1)
+            # Search deeper for www inside any subfolders
+            FIND_WWW=$(find extracted_src -type d -name "www" | head -n 1)
             if [ -n "$FIND_WWW" ]; then
               cp -r "$FIND_WWW" ./www
-              echo "Found www at: $FIND_WWW"
+              echo "Found www folder at: $FIND_WWW"
             else
-              echo "Error: Could not locate assets/www folder."
+              echo "Error: Could not locate www folder inside src.zip."
               exit 1
             fi
           fi
@@ -216,5 +201,5 @@ jobs:
           tag: ${{ steps.tag.outputs.RELEASE_TAG }}
           name: "Outertale iOS Build ${{ steps.tag.outputs.RELEASE_TAG }}"
           body: |
-            Automated iOS port compiled from Outertale.
+            Automated iOS port compiled from GameJolt src.zip assets.
           token: ${{ secrets.GITHUB_TOKEN }}
