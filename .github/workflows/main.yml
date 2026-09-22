@@ -23,45 +23,52 @@ jobs:
 
       - name: Download src.zip from MediaFire
         run: |
-          MEDIAFIRE_LINK="https://www.mediafire.com/file/8k8okc39c1vgbj9/src.zip?dkey=r7j9tu853x4&r=1508"
+          MEDIAFIRE_PAGE="https://www.mediafire.com/file/8k8okc39c1vgbj9/src.zip/file"
+          
+          echo "Fetching direct MediaFire download URL..."
+          DIRECT_URL=$(curl -sL "$MEDIAFIRE_PAGE" | grep -oE 'https://download[0-9]+\.mediafire\.com/[^"]+' | head -n 1)
 
-          echo "Attempting download from MediaFire..."
-          curl -L -A "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36" \
-            -o src.zip "$MEDIAFIRE_LINK"
-
-          # Fallback check: If MediaFire returned HTML page, extract raw direct download URL
-          if ! file src.zip | grep -q "Zip archive data"; then
-            echo "Initial link returned HTML. Resolving direct download link..."
-            DIRECT_URL=$(grep -o 'href="https://download[^"]*' src.zip | head -n 1 | cut -d'"' -f2)
-            if [ -n "$DIRECT_URL" ]; then
-              echo "Found direct link: $DIRECT_URL"
-              curl -L -A "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36" -o src.zip "$DIRECT_URL"
-            fi
+          if [ -z "$DIRECT_URL" ]; then
+            echo "Direct link extraction failed. Trying direct key parameter..."
+            DIRECT_URL="https://www.mediafire.com/file/8k8okc39c1vgbj9/src.zip?dkey=r7j9tu853x4&r=1508"
           fi
 
-          echo "Downloaded file verification:"
+          echo "Downloading from: $DIRECT_URL"
+          curl -L -A "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36" \
+            -o src.zip "$DIRECT_URL"
+
+          echo "Verifying downloaded archive:"
           file src.zip
           ls -lh src.zip
 
-      - name: Extract src.zip and Locate www
+          if ! file src.zip | grep -q "Zip archive data"; then
+            echo "Error: Downloaded file is not a valid ZIP archive."
+            exit 1
+          fi
+
+      - name: Extract www Directly from src.zip
         run: |
-          mkdir -p extracted_src
-          
-          unzip -q src.zip -d extracted_src
-          
-          if [ -d "extracted_src/www" ]; then
-            cp -r extracted_src/www ./www
-            echo "Successfully isolated www folder!"
+          # Extract only the www directory to save disk space and prevent storage exit code 50
+          unzip -q src.zip "www/*" -d . || unzip -q src.zip "*/www/*" -d .
+
+          if [ -d "www" ]; then
+            echo "Successfully isolated www directory!"
+          elif [ -d "extracted_src/www" ]; then
+            mv extracted_src/www ./www
+            echo "Isolated www from subfolder!"
           else
-            FIND_WWW=$(find extracted_src -type d -name "www" | head -n 1)
+            FIND_WWW=$(find . -type d -name "www" | head -n 1)
             if [ -n "$FIND_WWW" ]; then
-              cp -r "$FIND_WWW" ./www
-              echo "Found www folder at: $FIND_WWW"
+              mv "$FIND_WWW" ./www
+              echo "Found www directory at: $FIND_WWW"
             else
-              echo "Error: Could not locate www folder inside archive."
+              echo "Error: Could not locate www directory inside archive."
               exit 1
             fi
           fi
+
+          # Cleanup src.zip immediately to free up runner space
+          rm -f src.zip
 
       - name: Create App Payload & Update Detector
         run: |
